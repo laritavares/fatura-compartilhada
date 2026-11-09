@@ -49,6 +49,10 @@ input{background:var(--card);border:1px solid var(--line);border-radius:10px;pad
 .pick{display:flex;gap:6px;margin-top:8px}
 .pick button{flex:1;border:1px solid var(--line);background:none;border-radius:9px;padding:7px 0;font-size:14px;color:var(--mut)}
 .pick button.on{color:#fff;border-color:transparent;font-weight:500}
+.cat{margin-top:8px;width:auto;max-width:100%;padding:6px 10px;font-size:14px;color:var(--mut)}
+.tag{background:var(--line);border-radius:6px;padding:1px 7px;font-size:12px}
+.mes{display:flex;justify-content:space-between;align-items:center;gap:12px;width:100%;text-align:left;background:none;border:0;border-top:1px solid var(--line);padding:12px 0}
+.mes:first-child{border-top:0}.mes>span:first-child{display:grid}.mes .v{font-weight:600;font-variant-numeric:tabular-nums}
 .empty{text-align:center;padding:28px 8px}
 .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--tx);color:var(--bg);padding:10px 16px;border-radius:10px;font-size:14px;opacity:0;pointer-events:none;transition:opacity .2s}
 .toast.show{opacity:1}
@@ -74,6 +78,7 @@ input{background:var(--card);border:1px solid var(--line);border-radius:10px;pad
   </div>
   <h2>Resumo do mês</h2>
   <div class="sum" id="sum"></div>
+  <div id="prevbox" hidden><h2>Previsão dos próximos meses</h2><div class="card" id="prev"></div></div>
   <h2 id="tl">Gastos</h2>
   <div class="card" id="list"></div>
   <div class="bar" id="savebar" style="margin-top:16px" hidden><button class="btn" style="flex:1" data-act="salvar">Salvar fatura</button></div>
@@ -96,9 +101,38 @@ const brl = n => n.toLocaleString('pt-BR', {style:'currency', currency:'BRL'});
 const fmtD = d => d ? d.slice(8) + '/' + d.slice(5, 7) : '';
 const norm = d => d.toLowerCase().replace(/\d+\s*\/\s*\d+/g, '').replace(/\s+/g, ' ').trim();
 const cor = p => `var(--c${PESSOAS.indexOf(p)})`;
-let perfil = null, rows = [], regras = {}, mes = new Date().toISOString().slice(0, 7);
+let perfil = null, rows = [], regras = {}, regCat = {}, cats = [], mes = new Date().toISOString().slice(0, 7);
 
 function toast(t) { const e = $('#toast'); e.textContent = t; e.classList.add('show'); setTimeout(() => e.classList.remove('show'), 2200); }
+
+/* ---------- Parcelas e categorias ---------- */
+const RP = [/(parcela\s*)(\d{1,2})(\s*\/\s*)(\d{1,2})/i, /()(\d{1,2})(\s*\/\s*)(\d{1,2})\s*$/];
+function parc(d) { for (const re of RP) { const m = d.match(re); if (m && +m[4] <= 60 && +m[2] >= 1 && +m[2] < +m[4]) return {n: +m[2], N: +m[4], re}; } return null; }
+const futuro = (d, p, k) => d.replace(p.re, (m, a, n, s, N) => a + (p.n + k) + s + N);
+const addMes = (m, k) => { const [y, mm] = m.split('-').map(Number), d = new Date(y, mm - 1 + k, 1); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); };
+const nomeMes = m => new Date(m + '-01T12:00').toLocaleDateString('pt-BR', {month: 'short', year: 'numeric'});
+const sa = t => t.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+const DIC = [['Mercado', /mercado|supermerc|atacad|assai|carrefour|hortifruti|sacolao|acougue/], ['Alimentação', /ifood|restaur|lanch|padaria|pizza|burger|cafe|sorvet|mcdonald|confeit|doceria|pastel/],
+  ['Transporte', /uber|\b99\b|posto|shell|ipiranga|combust|estacion|pedagio|sem parar|conectcar|taxi/], ['Saúde', /farmac|drogar|droga|raia|clinic|hospital|laborat|unimed|dent/],
+  ['Assinaturas', /netflix|spotify|disney|hbo|prime video|youtube|google one|icloud|apple\.com|globoplay|deezer|assinatura/], ['Compras', /amazon|mercado ?livre|shopee|aliexpress|magalu|magazine|americanas|shein|renner|zara|c&a|riachuelo|kabum/],
+  ['Casa', /leroy|telha|movel|constru|eletro/], ['Educação', /curso|escola|facul|udemy|livraria|colegio/], ['Lazer', /cinema|ingresso|steam|playstation|hotel|airbnb|booking|viagem/]];
+const grupo = dono => (dono === 'Nice' || dono === 'Milton') ? 'dupla' : 'admin';
+function autoCat(desc, dono) {
+  const k = regCat[grupo(dono) + ':' + norm(desc)]; if (k) return k;
+  const t = sa(desc); const h = DIC.find(([, re]) => re.test(t)); return h ? h[0] : null;
+}
+async function setCat(i, cat) {
+  if (cat === '__novo__') {
+    cat = (prompt('Nome da nova categoria:') || '').trim();
+    if (!cat) return render();
+    cat = cat[0].toUpperCase() + cat.slice(1);
+    if (!cats.includes(cat)) { await sb.from('categorias').upsert({nome: cat}, {onConflict: 'nome', ignoreDuplicates: true}); cats.push(cat); cats.sort(); }
+  }
+  const r = rows[i]; r.categoria = cat || null;
+  if (r.id) { const {error} = await sb.rpc('definir_categoria', {p_id: r.id, p_categoria: r.categoria}); if (error) toast(error.message); }
+  if (cat) { const g = grupo(r.dono); regCat[g + ':' + norm(r.descricao)] = cat; sb.from('regras_categoria').upsert({grupo: g, descricao: norm(r.descricao), categoria: cat}); }
+  render();
+}
 
 /* ---------- CSV ---------- */
 function parseCSV(t) {
@@ -128,50 +162,69 @@ function importCSV(text) {
   const ix = (re, not = -1) => h.findIndex((x, i) => i !== not && re.test(x));
   const iD = ix(/data|date/), iT = ix(/descri|t[ií]tulo|title|hist|estabel|lan[cç]amento/, iD), iV = ix(/valor|amount|value/);
   if (iD < 0 || iT < 0 || iV < 0) return toast('Não achei as colunas de data, descrição e valor.');
-  rows = t.slice(1).map(r => ({data: toISO(r[iD] || ''), descricao: (r[iT] || '').trim(), valor: num(r[iV])}))
+  rows = t.slice(1).map(r => ({data: toISO(r[iD] || ''), descricao: (r[iT] || '').trim(), valor: num(r[iV]), previsto: false}))
     .filter(r => r.descricao && !isNaN(r.valor))
-    .map(r => ({...r, dono: regras[norm(r.descricao)] || null}));
+    .map(r => { const dono = regras[norm(r.descricao)] || null; return {...r, dono, categoria: autoCat(r.descricao, dono)}; });
   render();
-  toast(rows.length + ' gastos importados. Confira os donos e salve.');
+  const np = rows.filter(r => parc(r.descricao)).length;
+  toast(rows.length + ' gastos importados' + (np ? ` (${np} parcelados)` : '') + '. Confira e salve.');
 }
 
 /* ---------- Dados ---------- */
 async function carregar() {
-  const {data, error} = await sb.from('gastos').select('*').eq('mes', mes).order('data');
+  const {data, error} = await sb.from('gastos').select('*').eq('mes', mes).order('previsto').order('data');
   if (error) return toast(error.message);
-  rows = data; render();
+  rows = data; render(); previsao();
 }
 async function salvar() {
-  const ins = rows.map(({data, descricao, valor, dono}) => ({mes, data, descricao, valor, dono}));
+  const mk = (r, m, prev, desc) => ({mes: m, data: prev ? null : r.data, descricao: desc || r.descricao, valor: r.valor, dono: r.dono, categoria: r.categoria || null, previsto: prev});
+  const ins = rows.map(r => mk(r, mes, r.previsto));
   let r = await sb.from('gastos').delete().eq('mes', mes);
   if (r.error) return toast(r.error.message);
+  const reais = rows.filter(x => !x.previsto);
+  const {data: pos} = await sb.from('gastos').select('mes').eq('previsto', false).gt('mes', mes).limit(1);
+  if (reais.length && !(pos || []).length) {
+    await sb.from('gastos').delete().eq('previsto', true).gt('mes', mes);
+    reais.forEach(x => { const p = parc(x.descricao); if (p) for (let k = 1; k <= p.N - p.n; k++) ins.push(mk(x, addMes(mes, k), true, futuro(x.descricao, p, k))); });
+  }
   if (ins.length) { r = await sb.from('gastos').insert(ins); if (r.error) return toast(r.error.message); }
   const m = {}; rows.forEach(x => x.dono && (m[norm(x.descricao)] = x.dono));
   const rg = Object.entries(m).map(([descricao, dono]) => ({descricao, dono}));
   if (rg.length) await sb.from('regras').upsert(rg);
   Object.assign(regras, m);
+  const rc = {}; rows.forEach(x => x.categoria && (rc[grupo(x.dono) + '|' + norm(x.descricao)] = x.categoria));
+  const lc = Object.entries(rc).map(([k, categoria]) => { const [g, descricao] = k.split('|'); regCat[g + ':' + descricao] = categoria; return {grupo: g, descricao, categoria}; });
+  if (lc.length) await sb.from('regras_categoria').upsert(lc);
   await carregar(); toast('Fatura salva');
+}
+async function previsao() {
+  const {data} = await sb.from('gastos').select('mes,dono,valor').eq('previsto', true).order('mes');
+  const g = {}; (data || []).forEach(x => { const o = g[x.mes] || (g[x.mes] = {t: 0, p: {}}); o.t += Number(x.valor); o.p[x.dono || '-'] = (o.p[x.dono || '-'] || 0) + Number(x.valor); });
+  const ms = Object.keys(g).sort().slice(0, 8);
+  $('#prevbox').hidden = !ms.length;
+  $('#prev').innerHTML = ms.map(m => `<button class="mes" data-act="mes" data-m="${m}"><span><b>${nomeMes(m)}</b><span class="mut">${Object.entries(g[m].p).map(([k, v]) => k + ' ' + brl(v)).join(' · ')}</span></span><span class="v">${brl(g[m].t)}</span></button>`).join('');
 }
 function mensagem(p) {
   const l = rows.filter(r => r.dono === p), [y, m] = mes.split('-');
-  return `Oi, ${p}! Fatura de ${m}/${y}\n\n` + l.map(r => `${fmtD(r.data)}  ${r.descricao}  ${brl(r.valor)}`).join('\n') +
+  return `Oi, ${p}! Fatura de ${m}/${y}\n\n` + l.map(r => `${r.previsto ? 'prev.' : fmtD(r.data)}  ${r.descricao}${r.categoria ? ' (' + r.categoria + ')' : ''}  ${brl(r.valor)}`).join('\n') +
     `\n\nTotal: ${brl(l.reduce((s, r) => s + r.valor, 0))}`;
 }
 
 /* ---------- Tela ---------- */
+const opts = c => '<option value="">Sem categoria</option>' + cats.map(x => `<option${x === c ? ' selected' : ''}>${esc(x)}</option>`).join('') + (c && !cats.includes(c) ? `<option selected>${esc(c)}</option>` : '') + '<option value="__novo__">+ Nova categoria…</option>';
 function render() {
   const adm = perfil.admin;
   $('#up').hidden = $('#savebar').hidden = !adm;
   const alvo = adm ? PESSOAS : ['Nice', 'Milton'];
   $('#sum').innerHTML = alvo.map(p => {
     const t = rows.filter(r => r.dono === p).reduce((s, r) => s + r.valor, 0);
-    return `<div class="card who"><span class="dot" style="background:${cor(p)}"></span><b>${p}</b><span class="v">${brl(t)}</span>` +
-      (adm ? `<button class="ghost" data-act="copiar" data-p="${p}">Copiar</button>` : '') + `</div>`;
+    return `<div class="card who"><span class="dot" style="background:${cor(p)}"></span><b>${p}</b><span class="v">${brl(t)}</span><button class="ghost" data-act="copiar" data-p="${p}">Copiar</button></div>`;
   }).join('');
-  const sem = rows.filter(r => !r.dono).length;
-  $('#tl').textContent = adm && sem ? `Gastos (${sem} sem dono)` : 'Gastos';
+  const sem = rows.filter(r => !r.dono).length, pv = rows.some(r => r.previsto);
+  $('#tl').textContent = 'Gastos' + (adm && sem ? ` (${sem} sem dono)` : '') + (pv ? ' · inclui previsão' : '');
   $('#list').innerHTML = rows.length ? rows.map((r, i) =>
-    `<div class="row"><div class="l"><div class="d">${esc(r.descricao)}<div class="mut">${fmtD(r.data)}${!adm && r.dono ? ' &nbsp;<span class="dot" style="display:inline-block;background:' + cor(r.dono) + '"></span> ' + r.dono : ''}</div></div><div class="v">${brl(r.valor)}</div></div>` +
+    `<div class="row"><div class="l"><div class="d">${esc(r.descricao)}<div class="mut">${r.previsto ? '<span class="tag">previsto</span>' : fmtD(r.data)}${!adm && r.dono ? ' &nbsp;<span class="dot" style="display:inline-block;background:' + cor(r.dono) + '"></span> ' + r.dono : ''}</div></div><div class="v">${brl(r.valor)}</div></div>` +
+    `<select class="cat" data-i="${i}" aria-label="Categoria">${opts(r.categoria)}</select>` +
     (adm ? `<div class="pick">${PESSOAS.map(p => `<button data-act="dono" data-i="${i}" data-p="${p}" class="${r.dono === p ? 'on' : ''}" style="${r.dono === p ? 'background:' + cor(p) : ''}">${p}</button>`).join('')}</div>` : '') + `</div>`
   ).join('') : `<div class="empty mut">${adm ? 'Nenhuma fatura neste mês. Envie o CSV para começar.' : 'Ainda não há gastos neste mês.'}</div>`;
 }
@@ -187,9 +240,11 @@ document.addEventListener('click', async e => {
   if (a === 'sair') { await sb.auth.signOut(); location.reload(); }
   if (a === 'dono') { const r = rows[b.dataset.i]; r.dono = r.dono === b.dataset.p ? null : b.dataset.p; render(); }
   if (a === 'salvar') salvar();
+  if (a === 'mes') { mes = b.dataset.m; $('#mes').value = mes; carregar(); scrollTo({top: 0, behavior: 'smooth'}); }
   if (a === 'copiar') { await navigator.clipboard.writeText(mensagem(b.dataset.p)); toast('Resumo de ' + b.dataset.p + ' copiado'); }
 });
 $('#csv').addEventListener('change', async e => { const f = e.target.files[0]; if (f) importCSV(await f.text()); e.target.value = ''; });
+$('#list').addEventListener('change', e => { if (e.target.matches('select.cat')) setCat(+e.target.dataset.i, e.target.value); });
 $('#mes').addEventListener('change', e => { mes = e.target.value; carregar(); });
 
 async function iniciar() {
@@ -199,6 +254,8 @@ async function iniciar() {
   if (!p) { toast('Seu acesso ainda não foi liberado.'); await sb.auth.signOut(); $('#login').hidden = false; return; }
   perfil = p;
   if (p.admin) { const {data} = await sb.from('regras').select('*'); (data || []).forEach(x => regras[x.descricao] = x.dono); }
+  const {data: c} = await sb.from('categorias').select('nome').order('nome'); cats = (c || []).map(x => x.nome);
+  const {data: rc} = await sb.from('regras_categoria').select('*'); (rc || []).forEach(x => regCat[x.grupo + ':' + x.descricao] = x.categoria);
   $('#login').hidden = true; $('#app').hidden = false;
   $('#ola').textContent = 'Olá, ' + p.nome;
   $('#mes').value = mes;
