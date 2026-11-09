@@ -162,7 +162,7 @@ function mensagem(p) {
 function render() {
   const adm = perfil.admin;
   $('#up').hidden = $('#savebar').hidden = !adm;
-  const alvo = adm ? PESSOAS : [perfil.nome];
+  const alvo = adm ? PESSOAS : ['Nice', 'Milton'];
   $('#sum').innerHTML = alvo.map(p => {
     const t = rows.filter(r => r.dono === p).reduce((s, r) => s + r.valor, 0);
     return `<div class="card who"><span class="dot" style="background:${cor(p)}"></span><b>${p}</b><span class="v">${brl(t)}</span>` +
@@ -171,7 +171,7 @@ function render() {
   const sem = rows.filter(r => !r.dono).length;
   $('#tl').textContent = adm && sem ? `Gastos (${sem} sem dono)` : 'Gastos';
   $('#list').innerHTML = rows.length ? rows.map((r, i) =>
-    `<div class="row"><div class="l"><div class="d">${esc(r.descricao)}<div class="mut">${fmtD(r.data)}</div></div><div class="v">${brl(r.valor)}</div></div>` +
+    `<div class="row"><div class="l"><div class="d">${esc(r.descricao)}<div class="mut">${fmtD(r.data)}${!adm && r.dono ? ' &nbsp;<span class="dot" style="display:inline-block;background:' + cor(r.dono) + '"></span> ' + r.dono : ''}</div></div><div class="v">${brl(r.valor)}</div></div>` +
     (adm ? `<div class="pick">${PESSOAS.map(p => `<button data-act="dono" data-i="${i}" data-p="${p}" class="${r.dono === p ? 'on' : ''}" style="${r.dono === p ? 'background:' + cor(p) : ''}">${p}</button>`).join('')}</div>` : '') + `</div>`
   ).join('') : `<div class="empty mut">${adm ? 'Nenhuma fatura neste mês. Envie o CSV para começar.' : 'Ainda não há gastos neste mês.'}</div>`;
 }
