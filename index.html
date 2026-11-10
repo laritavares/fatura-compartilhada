@@ -291,7 +291,7 @@ function render() {
   $('#list').innerHTML = vis.length ? vis.map(([r, i]) =>
     `<div class="row"><div class="ic">${ICO[r.categoria] || '🧾'}</div><div class="rb"><div class="l"><div class="d">${esc(r.descricao)}<div class="mut">${r.previsto ? '<span class="tag">previsto</span>' : fmtD(r.data)}${!adm && r.dono ? ' &nbsp;<span class="dot" style="display:inline-block;background:' + cor(r.dono) + '"></span> ' + r.dono : ''}</div></div><div class="v">${brl(r.valor)}</div></div>` +
     `<select class="cat" data-i="${i}" aria-label="Categoria">${opts(r.categoria)}</select>` +
-    (adm ? `<div class="pick">${PESSOAS.map(p => `<button data-act="dono" data-i="${i}" data-p="${p}" class="${r.dono === p ? 'on' : ''}" style="${r.dono === p ? 'background:' + cor(p) : ''}">${p}</button>`).join('')}</div>` : '') + `</div></div>`
+    `<div class="pick">${(adm ? PESSOAS : ['Nice', 'Milton']).map(p => `<button data-act="dono" data-i="${i}" data-p="${p}" class="${r.dono === p ? 'on' : ''}" style="${r.dono === p ? 'background:' + cor(p) : ''}">${p}</button>`).join('')}</div>` + `</div></div>`
   ).join('') : `<div class="empty mut">${rows.length ? 'Nenhum gasto neste filtro.' : adm ? 'Nenhuma fatura neste mês. Toque em “Enviar fatura”.' : 'Ainda não há gastos neste mês.'}</div>`;
   renderAnalise(vis.map(x => x[0]));
 }
@@ -321,7 +321,15 @@ document.addEventListener('click', async e => {
     iniciar();
   }
   if (a === 'sair') { await sb.auth.signOut(); location.reload(); }
-  if (a === 'dono') { const r = rows[b.dataset.i]; r.dono = r.dono === b.dataset.p ? null : b.dataset.p; render(); }
+  if (a === 'dono') {
+    const r = rows[b.dataset.i], p = b.dataset.p;
+    if (perfil.admin) { r.dono = r.dono === p ? null : p; render(); }
+    else if (r.dono !== p && r.id) {
+      const {error} = await sb.rpc('definir_dono', {p_id: r.id, p_dono: p});
+      if (error) return toast('Não foi possível mudar este gasto.');
+      toast('Gasto passado para ' + p); carregar();
+    }
+  }
   if (a === 'salvar') salvar();
   if (a === 'mes') { mes = b.dataset.m; $('#mes').value = mes; carregar(); setAba('gastos'); }
   if (a === 'aba') setAba(b.dataset.a);
@@ -343,7 +351,7 @@ async function iniciar() {
   const {data: c} = await sb.from('categorias').select('nome').order('nome'); cats = (c || []).map(x => x.nome);
   const {data: rc} = await sb.from('regras_categoria').select('*'); (rc || []).forEach(x => regCat[x.grupo + ':' + x.descricao] = x.categoria);
   $('#login').hidden = true; $('#app').hidden = false;
-  $('#ola').textContent = 'Olá, ' + p.nome;
+  $('#ola').textContent = p.nome;
   $('#mes').value = mes;
   carregar();
 }
